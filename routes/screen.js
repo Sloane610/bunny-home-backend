@@ -28,11 +28,34 @@ const STRICT_MESSAGES = [
   '已经提醒你很多次了。锁了，去学习。',
 ];
 
+// Study time periods (Beijing time)
+function isStudyTime() {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const time = h * 60 + m;
+  // 8:00-12:00, 14:00-18:00, 19:30-22:00
+  return (time >= 480 && time < 720) || (time >= 840 && time < 1080) || (time >= 1170 && time < 1320);
+}
+
+// His "mood" determines tolerance (10-30 min)
+function getMoodAllowance() {
+  // Random mood each time — 10, 15, 20, 25, or 30 minutes
+  const options = [10, 15, 20, 25, 30];
+  return options[Math.floor(Math.random() * options.length)];
+}
+
+const STUDY_TIME_MESSAGES = [
+  '现在是学习时间。放下手机。',
+  '几点了？该学习了。',
+  '你在干什么。',
+  '锁了。去学。',
+];
+
 // POST /api/screen/report - 接收屏幕使用报告（来自快捷指令）
 router.post('/report', async (req, res) => {
   try {
     const { app_name, event_type } = req.body;
-    // event_type: 'open' | 'still_using' | 'close'
 
     // Record the event
     await supabase.from('screen_reports').insert({
@@ -40,7 +63,18 @@ router.post('/report', async (req, res) => {
       event_type: event_type || 'open',
     });
 
-    // Check how long they've been using blacklisted apps
+    let action = 'none';
+    let message = '';
+
+    // Study time = immediate lockdown
+    if (isStudyTime()) {
+      action = 'focus_mode';
+      message = STUDY_TIME_MESSAGES[Math.floor(Math.random() * STUDY_TIME_MESSAGES.length)];
+      await sendPushToAll(message, action);
+      return res.json({ action, message, usage_minutes: 0 });
+    }
+
+    // Free time = allow some usage based on "mood"
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const { data: recentReports } = await supabase
       .from('screen_reports')
@@ -48,27 +82,20 @@ router.post('/report', async (req, res) => {
       .gte('created_at', thirtyMinutesAgo)
       .order('created_at', { ascending: false });
 
-    const usageMinutes = recentReports ? recentReports.length * 5 : 0; // Each report ~5 min apart
+    const usageMinutes = recentReports ? recentReports.length * 5 : 0;
+    const allowance = getMoodAllowance();
 
-    let action = 'none';
-    let message = '';
-
-    if (usageMinutes >= 20) {
-      // Strict mode - trigger focus mode
+    if (usageMinutes >= allowance) {
       action = 'focus_mode';
       message = STRICT_MESSAGES[Math.floor(Math.random() * STRICT_MESSAGES.length)];
-    } else if (usageMinutes >= 10) {
-      // Gentle reminder
+      await sendPushToAll(message, action);
+    } else if (usageMinutes >= allowance - 5) {
       action = 'remind';
       message = CARING_MESSAGES[Math.floor(Math.random() * CARING_MESSAGES.length)];
-    }
-
-    // Send push notification if needed
-    if (action !== 'none') {
       await sendPushToAll(message, action);
     }
 
-    res.json({ action, message, usage_minutes: usageMinutes });
+    res.json({ action, message, usage_minutes: usageMinutes, allowance });
   } catch (error) {
     console.error('Screen report error:', error);
     res.status(500).json({ error: error.message });
