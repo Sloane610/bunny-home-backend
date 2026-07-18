@@ -101,6 +101,8 @@ router.post('/send', async (req, res) => {
 
     // Assemble context
     let systemContent = settings.system_prompt || DEFAULT_SYSTEM_PROMPT;
+    const now = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    systemContent += `\n\n【当前时间】${now}`;
     if (memories) {
       systemContent += `\n\n【你们之前的回忆】\n${memories}`;
     }
