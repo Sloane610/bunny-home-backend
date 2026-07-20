@@ -143,9 +143,43 @@ async function sendPushToAll(message, action) {
           .from('push_subscriptions')
           .delete()
           .eq('subscription', sub.subscription);
+      } else {
+        console.error('Push error:', err.statusCode, err.body);
       }
     }
   }
 }
+
+// GET /api/screen/test-push - 测试推送
+router.get('/test-push', async (req, res) => {
+  try {
+    const { data: subscriptions } = await supabase
+      .from('push_subscriptions')
+      .select('subscription');
+
+    if (!subscriptions || subscriptions.length === 0) {
+      return res.json({ error: 'No subscriptions found' });
+    }
+
+    const payload = JSON.stringify({
+      title: '测试',
+      body: '如果你看到这条通知，推送功能正常。',
+      action: 'none',
+    });
+
+    const results = [];
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification(JSON.parse(sub.subscription), payload);
+        results.push({ status: 'ok' });
+      } catch (err) {
+        results.push({ status: 'error', code: err.statusCode, message: err.body || err.message });
+      }
+    }
+    res.json({ subscriptions: subscriptions.length, results });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 module.exports = router;
